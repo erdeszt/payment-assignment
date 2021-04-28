@@ -1,8 +1,8 @@
 package challenge
 
 import java.time.{LocalDate, ZoneOffset}
-
-import cats.Applicative
+import cats.{Applicative, Functor}
+import cats.syntax.applicative._
 import cats.effect.{IO, Sync}
 import doobie.implicits._
 import doobie.implicits.javatime._
@@ -77,40 +77,27 @@ object Payers {
 
     override def balance(payerId: Id, date: LocalDate): IO[Balance] = {
       val invoicesIO = {
-        sql"""SELECT invoiceId, total, payerId, sentAt FROM invoice
+        sql"""SELECT sum(total) FROM invoice
              |WHERE payerId = ${payerId.id} and sentAt < ${date}
            """.stripMargin
-          .query[Invoices.Invoice]
-          .to[List]
+          .query[Double]
+          .unique
           .transact(tx)
       }
 
       val paymentsIO = {
-        sql"""SELECT paymentId, amount, payerId, receivedAt FROM payment
+        sql"""SELECT sum(amount) FROM payment
              |WHERE payerId = ${payerId.id} and receivedAt < ${date}
            """.stripMargin
-          .query[Payments.Payment]
-          .to[List]
+          .query[Double]
+          .unique
           .transact(tx)
       }
 
       for {
-        invoices <- invoicesIO
-        payments <- paymentsIO
-      } yield Balance(payerId.id, calculateBalance(invoices, payments))
-    }
-
-    /** The balance for a given [[Payer]] is the amount that the payer still has left to pay (if negative)
-      * or has paid in advance (if positive) on a given date (at midnight).
-      *
-      * If the balance is zero, then all invoices sent before the given date have been paid in full,
-      * and nothing has been paid in advance.
-      *
-      * @param allInvoices The invoices to take into account for the balance
-      * @param allPayments The payments to take into account for the balance
-      */
-    private def calculateBalance(invoices: List[Invoices.Invoice], payments: List[Payments.Payment]): Double = {
-      invoices.map(_.total).sum + payments.map(_.amount).sum
+        invoiceSum <- invoicesIO
+        paymentSum <- paymentsIO
+      } yield Balance(payerId.id, invoiceSum + paymentSum)
     }
   }
 
