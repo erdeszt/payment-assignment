@@ -25,12 +25,3 @@ CREATE TABLE `payment` (
   `receivedAt` datetime NOT NULL,
   PRIMARY KEY (`paymentId`)
 );
-
-DROP TABLE IF EXISTS `coverage`;
-CREATE TABLE `coverage` (
-    `invoiceId` int(10) unsigned NOT NULL,
-    `paymentId` int(10) unsigned NOT NULL
-    `remaining` double NULL,
-    -- TODO: FK Constraint
-    -- TODO: Unique Constraint for (invId, paymId)
-);
