@@ -17,6 +17,7 @@ import org.http4s.{EntityDecoder, EntityEncoder, HttpRoutes}
 trait Invoices[F[_]] {
   def get(id: Invoices.Id): F[Option[Invoices.Invoice]]
   def create(invoice: Invoices.New): F[Invoices.Id]
+  def covers(id: Invoices.Id): F[Option[Invoices.CoveredBy]]
 }
 
 object Invoices {
@@ -56,6 +57,12 @@ object Invoices {
     implicit def entityDecoder[F[_]: Sync]: EntityDecoder[F, Id] = jsonOf
     implicit def entityEncoder[F[_]: Applicative]: EntityEncoder[F, Id] = jsonEncoderOf
   }
+  final case class CoveredBy(payments: List[Payments.Id])
+  object CoveredBy {
+    implicit val codec: Codec[CoveredBy] = deriveCodec[CoveredBy]
+    implicit def entityDecoder[F[_]: Sync]: EntityDecoder[F, CoveredBy] = jsonOf
+    implicit def entityEncoder[F[_]: Applicative]: EntityEncoder[F, CoveredBy] = jsonEncoderOf
+  }
 
   def impl(tx: Transactor[IO]): Invoices[IO] = new Invoices[IO] {
     override def get(invoiceId: Id): IO[Option[Invoice]] = {
@@ -78,6 +85,10 @@ object Invoices {
       } yield Id(id)
 
       q.transact(tx)
+    }
+
+    override def covers(id: Invoices.Id): IO[Option[CoveredBy]] = {
+      ???
     }
   }
 
