@@ -17,6 +17,7 @@ trait Payers[F[_]] {
   def get(id: Payers.Id): F[Option[Payers.Payer]]
   def create(payer: Payers.New): F[Payers.Id]
   def balance(payerId: Payers.Id, date: LocalDate): F[Payers.Balance]
+  def balances(): F[Payers.Balances]
 }
 
 object Payers {
@@ -46,12 +47,17 @@ object Payers {
     implicit def entityDecoder[F[_]: Sync]: EntityDecoder[F, Id] = jsonOf
     implicit def entityEncoder[F[_]: Applicative]: EntityEncoder[F, Id] = jsonEncoderOf
   }
-
   final case class Balance(payerId: Int, balance: Double)
   object Balance {
     implicit val codec: Codec[Balance] = deriveCodec[Balance]
     implicit def entityDecoder[F[_]: Sync]: EntityDecoder[F, Balance] = jsonOf
     implicit def entityEncoder[F[_]: Applicative]: EntityEncoder[F, Balance] = jsonEncoderOf
+  }
+  final case class Balances(balances: List[Balance])
+  object Balances {
+    implicit val codec: Codec[Balances] = deriveCodec[Balances]
+    implicit def entityDecoder[F[_]: Sync]: EntityDecoder[F, Balances] = jsonOf
+    implicit def entityEncoder[F[_]: Applicative]: EntityEncoder[F, Balances] = jsonEncoderOf
   }
 
   def impl(tx: Transactor[IO]): Payers[IO] = new Payers[IO] {
@@ -99,6 +105,22 @@ object Payers {
         paymentSum <- paymentsIO
       } yield Balance(payerId.id, invoiceSum + paymentSum)
     }
+
+    override def balances(): IO[Balances] = {
+      sql"""select payment.payerId, sum(amount) as payed, coalesce(i.tt, 0) as invoiced
+         |from payment
+         |left join (select payerId, sum(total) as tt from invoice group by payerId) as i on payment.payerId = i.payerId
+         |group by payerId
+       """.stripMargin
+        .query[(Payers.Id, Double, Double)]
+        .to[List]
+        .transact(tx)
+        .map { balances =>
+          Balances(balances.map { case (payerId, payed, invoiced) =>
+            Balance(payerId.id, invoiced + payed)
+          })
+        }
+    }
   }
 
   def routes(payers: Payers[IO]): HttpRoutes[IO] = {
@@ -106,6 +128,9 @@ object Payers {
     import dsl._
 
     HttpRoutes.of[IO] {
+      case GET -> Root / "payer" =>
+        payers.balances().flatMap(Ok(_))
+
       case GET -> Root / "payer" / IntVar(payerId) =>
         payers.get(Id(payerId)).flatMap {
           case Some(payer) => Ok(payer)

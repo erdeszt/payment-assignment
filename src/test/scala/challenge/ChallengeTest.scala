@@ -100,6 +100,50 @@ class ChallengeTest extends AnyFreeSpec with Matchers {
 
       io.unsafeRunSync()
     }
+
+    "should have the right balance for all users" in {
+      val io = for {
+        payer1Req <- POST(Payers.New("Mrs Brodie"), uri"""http://0.0.0.0:8080/payer""")
+        payer1Id <- payersService.orNotFound.run(payer1Req).flatMap(_.as[Payers.Id])
+        payer2Req <- POST(Payers.New("Ms Ferrara"), uri"""http://0.0.0.0:8080/payer""")
+        payer2Id <- payersService.orNotFound.run(payer2Req).flatMap(_.as[Payers.Id])
+
+        // Add invoices of -100 for both payers
+        invReq1 <- POST(
+          Invoices.New(-100, payer1Id.id, Some(LocalDateTime.of(2020, 10, 10, 14, 30))),
+          uri"""http://0.0.0.0:8080/invoice"""
+        )
+        _ <- invoicesService.orNotFound.run(invReq1).flatMap(_.as[Unit])
+        invReq2 <- POST(
+          Invoices.New(-100, payer2Id.id, Some(LocalDateTime.of(2020, 10, 10, 14, 30))),
+          uri"""http://0.0.0.0:8080/invoice"""
+        )
+        _ <- invoicesService.orNotFound.run(invReq2).flatMap(_.as[Unit])
+
+        // Add payment of 50 for payer 1
+        payment1Req <- POST(
+          Payments.New(50, payer1Id.id, Some(LocalDateTime.of(2020, 10, 10, 14, 45))),
+          uri"""http://0.0.0.0:8080/payment"""
+        )
+        _ <- paymentsService.orNotFound.run(payment1Req).flatMap(_.as[Unit])
+
+        // Add payment of 150 for payer 2
+        payment2Req <- POST(
+          Payments.New(150, payer2Id.id, Some(LocalDateTime.of(2020, 10, 10, 14, 45))),
+          uri"""http://0.0.0.0:8080/payment"""
+        )
+        _ <- paymentsService.orNotFound.run(payment2Req).flatMap(_.as[Unit])
+
+        balancesReq <- GET(uri"""http://0.0.0.0:8080/payer""")
+        balances <- payersService.orNotFound.run(balancesReq).flatMap(_.as[Payers.Balances])
+        balanceLookup = balances.balances.map(balance => (balance.payerId, balance.balance)).toMap
+      } yield {
+        balanceLookup.get(payer1Id.id) should contain(-50)
+        balanceLookup.get(payer2Id.id) should contain(50)
+      }
+
+      io.unsafeRunSync()
+    }
   }
 
   "Invoices" - {
