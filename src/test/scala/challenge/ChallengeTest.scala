@@ -4,11 +4,11 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
-
 import scala.concurrent.ExecutionContext.global
-
 import cats.effect.Blocker
 import cats.effect.IO
+import cats.instances.list._
+import cats.Traverse.ops._
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import doobie.hikari.HikariTransactor
@@ -131,6 +131,46 @@ class ChallengeTest extends AnyFreeSpec with Matchers {
         paymentFetchReq <- GET(uri"""http://0.0.0.0:8080/payment""".addSegment(paymentId.id.toString))
         payment <- paymentsService.orNotFound.run(paymentFetchReq).flatMap(_.as[Payments.Payment])
       } yield payment should matchPattern { case Payments.Payment(id, _, _, _) if id == paymentId.id => }
+
+      io.unsafeRunSync()
+    }
+
+    "should find the correct invoices covered by a payment" in {
+      val io = for {
+        payerReq <- POST(Payers.New("Dr Theodore"), uri"""http://0.0.0.0:8080/payer""")
+        payerId <- payersService.orNotFound.run(payerReq).flatMap(_.as[Payers.Id])
+
+        // Add 3 invoices of -100
+        // NOTE: Unsafe match but it's fine for tests
+        (invoice1Id :: invoice2Id :: invoice3Id :: Nil) <- 1.to(3).toList.traverse { _ =>
+          POST(
+            Invoices.New(-100, payerId.id, Some(LocalDateTime.of(2020, 10, 10, 14, 30))),
+            uri"""http://0.0.0.0:8080/invoice"""
+          ).flatMap(req => invoicesService.orNotFound.run(req).flatMap(_.as[Invoices.Id]))
+        }
+
+        // Add 3 payments of 150, 200 and 50
+        (payment1Id :: payment2Id :: payment3Id :: Nil) <- List(150, 200, 50).traverse { amount =>
+          POST(
+            Payments.New(amount, payerId.id, Some(LocalDateTime.of(2020, 10, 10, 14, 45))),
+            uri"""http://0.0.0.0:8080/payment"""
+          ).flatMap(req => paymentsService.orNotFound.run(req).flatMap(_.as[Payments.Id]))
+        }
+
+        // Get the coverage for all three payments
+        (payment1Covers :: payment2Covers :: payment3Covers :: Nil) <- List(payment1Id, payment2Id, payment3Id)
+          .traverse { paymentId =>
+            for {
+              coversUrl <- IO.fromEither(Uri.fromString(s"http://0.0.0.0:8080/payment/${paymentId.id}/covers"))
+              coversReq <- GET(coversUrl)
+              covers <- paymentsService.orNotFound.run(coversReq).flatMap(_.as[Payments.Covers])
+            } yield covers
+          }
+      } yield {
+        payment1Covers.invoices should contain theSameElementsAs List(invoice1Id, invoice2Id)
+        payment2Covers.invoices should contain theSameElementsAs List(invoice2Id, invoice3Id)
+        payment3Covers.invoices should be(empty)
+      }
 
       io.unsafeRunSync()
     }
