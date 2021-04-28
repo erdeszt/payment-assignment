@@ -82,8 +82,8 @@ object Payments {
       val q = for {
         id <- sql"""INSERT INTO payment (amount, payerId, receivedAt)
                   |VALUES (${newPayment.amount}, ${newPayment.payerId}, $receivedAt)
-                 """.stripMargin.update.withUniqueGeneratedKeys[Int]("paymentId").map(Payments.Id(_))
-      } yield id
+                 """.stripMargin.update.withUniqueGeneratedKeys[Int]("paymentId")
+      } yield Id(id)
 
       q.transact(tx)
     }

@@ -103,6 +103,12 @@ object Invoices {
           case None          => NotFound()
         }
 
+      case GET -> Root / "invoice" / IntVar(invoiceId) / "covered-by" =>
+        invoices.coveredBy(Id(invoiceId)).flatMap {
+          case Some(payments) => Ok(payments)
+          case None           => NotFound()
+        }
+
       case req @ POST -> Root / "invoice" =>
         req.decode[New] { input =>
           invoices.create(input).flatMap(Ok(_))
