@@ -5,6 +5,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 import scala.concurrent.ExecutionContext.global
+import scala.concurrent.duration._
 import cats.effect.Blocker
 import cats.effect.IO
 import cats.instances.list._
@@ -24,6 +25,7 @@ class ChallengeTest extends AnyFreeSpec with Matchers {
   val blockingPool = Executors.newFixedThreadPool(5)
   val blocker = Blocker.liftExecutorService(blockingPool)
   implicit val cs = IO.contextShift(ExecutionContexts.synchronous)
+  implicit val timer = IO.timer(scala.concurrent.ExecutionContext.Implicits.global) // TODO
 
   val config = new HikariConfig()
   config.setDriverClassName("com.mysql.cj.jdbc.Driver")
@@ -186,19 +188,20 @@ class ChallengeTest extends AnyFreeSpec with Matchers {
 
         // Add 3 invoices of -100
         // NOTE: Unsafe match but it's fine for tests
-        (invoice1Id :: invoice2Id :: invoice3Id :: Nil) <- 1.to(3).toList.traverse { _ =>
+        (invoice1Id :: invoice2Id :: invoice3Id :: Nil) <- 1.to(3).toList.traverse { index =>
           POST(
-            Invoices.New(-100, payerId.id, Some(LocalDateTime.of(2020, 10, 10, 14, 30))),
+            Invoices.New(-100, payerId.id, Some(LocalDateTime.of(2020, 10, index, 14, 30))),
             uri"""http://0.0.0.0:8080/invoice"""
           ).flatMap(req => invoicesService.orNotFound.run(req).flatMap(_.as[Invoices.Id]))
         }
 
         // Add 3 payments of 150, 200 and 50
-        (payment1Id :: payment2Id :: payment3Id :: Nil) <- List(150, 200, 50).traverse { amount =>
-          POST(
-            Payments.New(amount, payerId.id, Some(LocalDateTime.of(2020, 10, 10, 14, 45))),
-            uri"""http://0.0.0.0:8080/payment"""
-          ).flatMap(req => paymentsService.orNotFound.run(req).flatMap(_.as[Payments.Id]))
+        (payment1Id :: payment2Id :: payment3Id :: Nil) <- List(150, 200, 50).zipWithIndex.traverse {
+          case (amount, index) =>
+            POST(
+              Payments.New(amount, payerId.id, Some(LocalDateTime.of(2020, 11, index + 1, 14, 45))),
+              uri"""http://0.0.0.0:8080/payment"""
+            ).flatMap(req => paymentsService.orNotFound.run(req).flatMap(_.as[Payments.Id]))
         }
 
         // Get the coverage for all three payments

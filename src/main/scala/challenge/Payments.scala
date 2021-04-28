@@ -88,14 +88,8 @@ object Payments {
       q.transact(tx)
     }
 
-    /*
-    TMP: Balance list query:
-    select payment.payerId, sum(amount) as payed, coalesce(i.tt, 0) as invoiced  from payment left join (select payerId, sum(total) as tt from invoice group by payerId) as i on payment.pa
-yerId = i.payerId  group by payerId;
-     */
-
     override def covers(id: Id): IO[Option[Covers]] = {
-      // TODO: OptionT
+      // Query the payment to check if it exists and get the payer id, amount and payment date
       sql"SELECT payerId, amount, receivedAt FROM payment WHERE paymentId = ${id} LIMIT 1"
         .query[(Payers.Id, Double, LocalDateTime)]
         .option
@@ -113,48 +107,58 @@ yerId = i.payerId  group by payerId;
               // If balance is positive, all previous invoices are fully paid
               // Otherwise collect the previous unpaid invoices covered by the payment
               (previousCoveredInvoices, remainingMoney) <-
-                if (balance < 0) {
+                if (balance >= 0) {
+                  Applicative[ConnectionIO].pure((List.empty[Invoices.Id], amount))
+                } else {
                   for {
                     // Invoices not fully covered by previous payments
                     unpaid <-
-                      sql"""select
+                      sql"""SELECT
                           |  i.invoiceId,
                           |  i.total,
-                          |  (select coalesce(sum(abs(total))) from invoice where payerId = ${payerId} and invoiceId <= i.invoiceId) as running_invoiced
-                          |from invoice i
-                          |where i.payerId = ${payerId} and i.sentAt < ${receivedAt}
-                          |having running_invoiced > ${payed}
-                          |order by sentAt asc
+                          |  (SELECT COALESCE(SUM(ABS(total))) FROM invoice WHERE payerId = ${payerId} AND invoiceId <= i.invoiceId) AS running_invoiced
+                          |FROM invoice i
+                          |WHERE i.payerId = ${payerId} AND i.sentAt < ${receivedAt}
+                          |HAVING running_invoiced > ${payed}
+                          |ORDER BY sentAt ASC
                          """.stripMargin.query[(Invoices.Id, Double, Option[Double])].to[List]
                   } yield unpaid.foldLeft((List.empty[Invoices.Id], amount)) {
                     case ((unpaids, remaining), (invoiceId, total, _)) =>
                       // Check if we can pay the current invoice
-                      if (remaining > total) {
-                        (invoiceId :: unpaids, remaining - total)
+                      if (remaining > Math.abs(total)) { // TODO: Stop once reached an unpayable
+                        (invoiceId :: unpaids, remaining + total)
                       } else {
                         (unpaids, remaining)
                       }
                   }
-                } else { Applicative[ConnectionIO].pure((List.empty[Invoices.Id], amount)) }
+                }
+              lastPaidId <- previousCoveredInvoices match {
+                case Nil =>
+                  sql"SELECT i.invoiceId, (SELECT COALESCE(SUM(ABS(total))) FROM invoice WHERE payerId = ${payerId} AND invoiceId < i.invoiceId) AS rt FROM invoice AS i WHERE payerId = ${payerId} HAVING rt < ${payed + amount} ORDER BY invoiceId DESC LIMIT 1"
+                    .query[(Invoices.Id, Double)]
+                    .option
+                    .map(_.map(_._1).getOrElse(Invoices.Id(0)))
+                case _ => Applicative[ConnectionIO].pure(previousCoveredInvoices.maxBy(_.id))
+              }
               // Get the invoices after this payment that are within are remaining budget
               payableInvoices <-
-                sql"""select
+                sql"""SELECT
                     | i.invoiceId,
                     | i.total,
-                    | (select coalesce(sum(abs(total))) from invoice where payerId = ${payerId} and invoiceId <= i.invoiceId) as running_invoiced
-                    | from invoice i
-                    | where i.payerId = ${payerId} and i.sentAt > ${receivedAt}
-                    | having running_invoiced <= ${remainingMoney}
-                    | order by sentAt asc
+                    | (SELECT COALESCE(SUM(ABS(total))) FROM invoice WHERE payerId = ${payerId} AND invoiceId < i.invoiceId AND invoiceId > ${lastPaidId}) AS running_invoiced
+                    | FROM invoice i
+                    | WHERE i.payerId = ${payerId} AND i.invoiceId > ${lastPaidId}
+                    | HAVING COALESCE(running_invoiced, 0) <= ${remainingMoney}
+                    | ORDER BY sentAt ASC
                    """.stripMargin.query[(Invoices.Id, Double, Option[Double])].to[List]
               totalPayable = payableInvoices.map(_._2).sum
-              remainingAfterPayable = remainingMoney - totalPayable
+              remainingAfterPayable = remainingMoney + totalPayable
               extraPayable <- payableInvoices match {
                 case Nil                             => Applicative[ConnectionIO].pure(Option.empty[Invoices.Id])
                 case _ if remainingAfterPayable <= 0 => Applicative[ConnectionIO].pure(Option.empty[Invoices.Id])
                 case _ =>
                   val lastPaidId = payableInvoices.maxBy(_._1.id)._1
-                  sql"select invoiceId from invoice where invoiceId > ${lastPaidId} and payerId = ${payerId} order by sentAt asc limit 1"
+                  sql"SELECT invoiceId FROM invoice WHERE invoiceId > ${lastPaidId} AND payerId = ${payerId} ORDER BY sentAt ASC LIMIT 1"
                     .query[Invoices.Id]
                     .option
               }

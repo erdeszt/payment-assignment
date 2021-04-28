@@ -107,11 +107,11 @@ object Payers {
     }
 
     override def balances(): IO[Balances] = {
-      sql"""select payment.payerId, sum(amount) as payed, coalesce(i.tt, 0) as invoiced
-         |from payment
-         |left join (select payerId, sum(total) as tt from invoice group by payerId) as i on payment.payerId = i.payerId
-         |group by payerId
-       """.stripMargin
+      sql"""SELECT payment.payerId, SUM(payment.amount) AS payed, COALESCE(i.total_invoiced, 0) AS invoiced
+           |FROM payment
+           |LEFT JOIN (SELECT payerId, SUM(total) AS total_invoiced FROM invoice GROUP BY payerId) AS i ON payment.payerId = i.payerId
+           |GROUP BY payerId
+         """.stripMargin
         .query[(Payers.Id, Double, Double)]
         .to[List]
         .transact(tx)

@@ -17,7 +17,7 @@ import org.http4s.{EntityDecoder, EntityEncoder, HttpRoutes}
 trait Invoices[F[_]] {
   def get(id: Invoices.Id): F[Option[Invoices.Invoice]]
   def create(invoice: Invoices.New): F[Invoices.Id]
-  def covers(id: Invoices.Id): F[Option[Invoices.CoveredBy]]
+  def coveredBy(id: Invoices.Id): F[Option[Invoices.CoveredBy]]
 }
 
 object Invoices {
@@ -87,7 +87,7 @@ object Invoices {
       q.transact(tx)
     }
 
-    override def covers(id: Invoices.Id): IO[Option[CoveredBy]] = {
+    override def coveredBy(id: Invoices.Id): IO[Option[CoveredBy]] = {
       ???
     }
   }
