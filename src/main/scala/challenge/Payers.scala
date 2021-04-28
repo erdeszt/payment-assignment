@@ -78,7 +78,7 @@ object Payers {
     override def balance(payerId: Id, date: LocalDate): IO[Balance] = {
       val invoicesIO = {
         sql"""SELECT invoiceId, total, payerId, sentAt FROM invoice
-             |WHERE payerId = ${payerId.id}
+             |WHERE payerId = ${payerId.id} and sentAt < ${date}
            """.stripMargin
           .query[Invoices.Invoice]
           .to[List]
@@ -87,7 +87,7 @@ object Payers {
 
       val paymentsIO = {
         sql"""SELECT paymentId, amount, payerId, receivedAt FROM payment
-             |WHERE payerId = ${payerId.id}
+             |WHERE payerId = ${payerId.id} and receivedAt < ${date}
            """.stripMargin
           .query[Payments.Payment]
           .to[List]
@@ -97,7 +97,7 @@ object Payers {
       for {
         invoices <- invoicesIO
         payments <- paymentsIO
-      } yield Balance(payerId.id, calculateBalance(date, invoices, payments))
+      } yield Balance(payerId.id, calculateBalance(invoices, payments))
     }
 
     /** The balance for a given [[Payer]] is the amount that the payer still has left to pay (if negative)
@@ -106,29 +106,10 @@ object Payers {
       * If the balance is zero, then all invoices sent before the given date have been paid in full,
       * and nothing has been paid in advance.
       *
-      * @param date The date for which the balance should be calculated
       * @param allInvoices The invoices to take into account for the balance
       * @param allPayments The payments to take into account for the balance
       */
-    private def calculateBalance(
-      date: LocalDate,
-      allInvoices: List[Invoices.Invoice],
-      allPayments: List[Payments.Payment]
-    ): Double = {
-      val invoices =
-        allInvoices
-          .map(invoice => (invoice, invoice.sentAt.toEpochSecond(ZoneOffset.UTC)))
-          .sortBy(_._2)
-          .takeWhile(date.toEpochDay <= _._2)
-          .map { case (invoice, _) => invoice }
-
-      val payments =
-        allPayments
-          .map(payment => (payment, payment.receivedAt.toEpochSecond(ZoneOffset.UTC)))
-          .sortBy(_._2)
-          .takeWhile(date.toEpochDay <= _._2)
-          .map { case (payment, _) => payment }
-
+    private def calculateBalance(invoices: List[Invoices.Invoice], payments: List[Payments.Payment]): Double = {
       invoices.map(_.total).sum + payments.map(_.amount).sum
     }
   }

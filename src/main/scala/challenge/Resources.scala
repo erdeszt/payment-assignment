@@ -61,7 +61,7 @@ object Resources {
         HikariTransactor
           .newHikariTransactor[IO](
             "com.mysql.cj.jdbc.Driver",
-            "jdbc:mysql://127.0.0.1:3306/challenge",
+            "jdbc:mysql://127.0.0.1:3306/challenge?serverTimezone=UTC",
             user,
             password,
             ec,

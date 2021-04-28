@@ -27,7 +27,7 @@ class ChallengeTest extends AnyFreeSpec with Matchers {
 
   val config = new HikariConfig()
   config.setDriverClassName("com.mysql.cj.jdbc.Driver")
-  config.setJdbcUrl("jdbc:mysql://127.0.0.1:3306/challenge")
+  config.setJdbcUrl("jdbc:mysql://127.0.0.1:3306/challenge?serverTimezone=UTC")
   config.setUsername("root")
   config.setPassword("root")
 
