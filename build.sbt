@@ -35,6 +35,5 @@ scalacOptions ++= Seq(
   "-language:higherKinds",
   "-language:postfixOps",
   "-feature",
-  "-Xlint:WARNING1,WARNING2",
   "-Xlint:unused"
 )
