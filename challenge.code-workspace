@@ -1,0 +1,58 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.exclude": {
+            "**/.bloop": true,
+            "**/.metals": true,
+            "**/target": true,
+            "**/out": true
+        },
+        "files.watcherExclude": {
+			"**/.bloop": true,
+			"**/.metals": true,
+			"**/target": true,
+			"**/out": true
+		},
+		"[scala]": {
+			"editor.suggestSelection": "first",
+			"editor.formatOnSave": true
+		}
+	},
+	"extensions": {
+        // See https://go.microsoft.com/fwlink/?LinkId=827846 to learn about workspace recommendations.
+        // Extension identifier format: ${publisher}.${name}. Example: vscode.csharp
+        // List of extensions which should be recommended for users of this workspace.
+        "recommendations": [
+            "scalameta.metals"
+        ],
+        // List of extensions recommended by VS Code that should not be recommended for users of this workspace.
+        "unwantedRecommendations": []
+    },
+	"launch": {
+		"configurations": [
+			{
+				"type": "scala",
+				"request": "launch",
+				"name": "Main",
+				"mainClass": "challenge.Main",
+				"args": [],
+				"jvmOptions": [
+					"-Duser.timezone=UTC"
+				]
+			},
+			{
+				"type": "scala",
+				"request": "launch",
+				"name": "Challenge Test",
+				"testClass": "challenge.ChallengeTest",
+				"jvmOptions": [
+					"-Duser.timezone=UTC"
+				]
+			}
+		]
+	}
+}
