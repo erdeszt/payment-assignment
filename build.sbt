@@ -25,7 +25,8 @@ lazy val root = (project in file("."))
       "org.scalactic" %% "scalactic" % ScalaTestVersion,
       "org.scalatest" %% "scalatest" % ScalaTestVersion % "test"
     ),
-    addCompilerPlugin("org.typelevel" %% "kind-projector" % "0.10.3")
+    addCompilerPlugin("org.typelevel" %% "kind-projector" % "0.10.3"),
+    addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
   )
 
 scalacOptions ++= Seq(

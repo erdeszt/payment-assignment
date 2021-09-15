@@ -1,8 +1,8 @@
 package challenge
 
 import java.time.{LocalDate, ZoneOffset}
-
-import cats.Applicative
+import cats.{Applicative, Functor}
+import cats.syntax.applicative._
 import cats.effect.{IO, Sync}
 import doobie.implicits._
 import doobie.implicits.javatime._
@@ -17,6 +17,7 @@ trait Payers[F[_]] {
   def get(id: Payers.Id): F[Option[Payers.Payer]]
   def create(payer: Payers.New): F[Payers.Id]
   def balance(payerId: Payers.Id, date: LocalDate): F[Payers.Balance]
+  def balances(): F[Payers.Balances]
 }
 
 object Payers {
@@ -46,12 +47,17 @@ object Payers {
     implicit def entityDecoder[F[_]: Sync]: EntityDecoder[F, Id] = jsonOf
     implicit def entityEncoder[F[_]: Applicative]: EntityEncoder[F, Id] = jsonEncoderOf
   }
-
   final case class Balance(payerId: Int, balance: Double)
   object Balance {
     implicit val codec: Codec[Balance] = deriveCodec[Balance]
     implicit def entityDecoder[F[_]: Sync]: EntityDecoder[F, Balance] = jsonOf
     implicit def entityEncoder[F[_]: Applicative]: EntityEncoder[F, Balance] = jsonEncoderOf
+  }
+  final case class Balances(balances: List[Balance])
+  object Balances {
+    implicit val codec: Codec[Balances] = deriveCodec[Balances]
+    implicit def entityDecoder[F[_]: Sync]: EntityDecoder[F, Balances] = jsonOf
+    implicit def entityEncoder[F[_]: Applicative]: EntityEncoder[F, Balances] = jsonEncoderOf
   }
 
   def impl(tx: Transactor[IO]): Payers[IO] = new Payers[IO] {
@@ -77,59 +83,43 @@ object Payers {
 
     override def balance(payerId: Id, date: LocalDate): IO[Balance] = {
       val invoicesIO = {
-        sql"""SELECT invoiceId, total, payerId, sentAt FROM invoice
-             |WHERE payerId = ${payerId.id}
+        sql"""SELECT sum(total) FROM invoice
+             |WHERE payerId = ${payerId.id} and sentAt < ${date}
            """.stripMargin
-          .query[Invoices.Invoice]
-          .to[List]
+          .query[Double]
+          .unique
           .transact(tx)
       }
 
       val paymentsIO = {
-        sql"""SELECT paymentId, amount, payerId, receivedAt FROM payment
-             |WHERE payerId = ${payerId.id}
+        sql"""SELECT sum(amount) FROM payment
+             |WHERE payerId = ${payerId.id} and receivedAt < ${date}
            """.stripMargin
-          .query[Payments.Payment]
-          .to[List]
+          .query[Double]
+          .unique
           .transact(tx)
       }
 
       for {
-        invoices <- invoicesIO
-        payments <- paymentsIO
-      } yield Balance(payerId.id, calculateBalance(date, invoices, payments))
+        invoiceSum <- invoicesIO
+        paymentSum <- paymentsIO
+      } yield Balance(payerId.id, invoiceSum + paymentSum)
     }
 
-    /** The balance for a given [[Payer]] is the amount that the payer still has left to pay (if negative)
-      * or has paid in advance (if positive) on a given date (at midnight).
-      *
-      * If the balance is zero, then all invoices sent before the given date have been paid in full,
-      * and nothing has been paid in advance.
-      *
-      * @param date The date for which the balance should be calculated
-      * @param allInvoices The invoices to take into account for the balance
-      * @param allPayments The payments to take into account for the balance
-      */
-    private def calculateBalance(
-      date: LocalDate,
-      allInvoices: List[Invoices.Invoice],
-      allPayments: List[Payments.Payment]
-    ): Double = {
-      val invoices =
-        allInvoices
-          .map(invoice => (invoice, invoice.sentAt.toEpochSecond(ZoneOffset.UTC)))
-          .sortBy(_._2)
-          .takeWhile(date.toEpochDay <= _._2)
-          .map { case (invoice, _) => invoice }
-
-      val payments =
-        allPayments
-          .map(payment => (payment, payment.receivedAt.toEpochSecond(ZoneOffset.UTC)))
-          .sortBy(_._2)
-          .takeWhile(date.toEpochDay <= _._2)
-          .map { case (payment, _) => payment }
-
-      invoices.map(_.total).sum + payments.map(_.amount).sum
+    override def balances(): IO[Balances] = {
+      sql"""SELECT payment.payerId, SUM(payment.amount) AS payed, COALESCE(i.total_invoiced, 0) AS invoiced
+           |FROM payment
+           |LEFT JOIN (SELECT payerId, SUM(total) AS total_invoiced FROM invoice GROUP BY payerId) AS i ON payment.payerId = i.payerId
+           |GROUP BY payerId
+         """.stripMargin
+        .query[(Payers.Id, Double, Double)]
+        .to[List]
+        .transact(tx)
+        .map { balances =>
+          Balances(balances.map { case (payerId, payed, invoiced) =>
+            Balance(payerId.id, invoiced + payed)
+          })
+        }
     }
   }
 
@@ -138,6 +128,9 @@ object Payers {
     import dsl._
 
     HttpRoutes.of[IO] {
+      case GET -> Root / "payer" =>
+        payers.balances().flatMap(Ok(_))
+
       case GET -> Root / "payer" / IntVar(payerId) =>
         payers.get(Id(payerId)).flatMap {
           case Some(payer) => Ok(payer)

@@ -16,7 +16,13 @@ This challenge forms the basis for a conversation about how you approach develop
 
 **If you want to detail anything about your solution, include it here:**
 <!-- START of your notes on the solution -->
-
+- I haven't finished `3.b` but the same idea used for payments should work there as well.
+- I think the two queries in `Payers.balance` could be merged into one, but I didn't spend time on it.
+- I'm not happy about the complexity of `Payments.cover` but it's a fixed number of queries (so no `N+1` issue) and most of them should be "fast enough"
+    - Thought about doing it by introducing a `Coverage` table with `(Invoices.Id, Payments.Id)` pairs, that would be very fast and simple to query
+      but it looked very complex on the write side when I tried to implement it.
+- There's a small bug in the `covers` method where it can skip over larger unpaid invoices and mark later, unpaid invoices that are within budget as covered.
+  The fix should be relatively simple.
 
 <!-- END of Notes -->
 
